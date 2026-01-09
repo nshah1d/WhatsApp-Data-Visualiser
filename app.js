@@ -1,5 +1,5 @@
 // Configuration
-const MY_NAME = "John Doe";  // Change this to your WhatsApp Display Name
+const MY_NAME = "John Doe"; // Change this to your WhatsApp Display Name
 const DATE_REGEX = /\[(\d{1,2}\/\d{1,2}\/\d{2,4}),\s*(\d{1,2}:\d{1,2}(?::\d{1,2})?)\]\s*(.*?):\s*(.*)/;
 const ATTACHMENT_REGEX = /<attached: (.*?)>/;
 const MSG_CHUNK_SIZE = 50; // How many messages to load at once
@@ -27,26 +27,28 @@ document.addEventListener('DOMContentLoaded', () => {
         timeout = setTimeout(() => handleSearch(e.target.value), 300);
     });
 
-    const msgContainer = document.getElementById('messageContainer');
-    msgContainer.addEventListener('scroll', handleMessageScroll);
-
-    const drawerContent = document.getElementById('drawerContent');
-    drawerContent.addEventListener('scroll', handleMediaScroll);
+    document.getElementById('messageContainer').addEventListener('scroll', handleMessageScroll);
+    document.getElementById('drawerContent').addEventListener('scroll', handleMediaScroll);
 });
 
 async function initApp() {
     try {
         const response = await fetch('scan.php');
-        const folders = await response.json();
+        const chatFolders = await response.json(); 
+        
         const loadedChats = [];
 
-        for (const folder of folders) {
-            const safeFolder = encodeURIComponent(folder);
+        for (const chatObj of chatFolders) {
+            const folderName = chatObj.id;
+            const fileInventory = chatObj.files;
+            
+            const safeFolder = encodeURIComponent(folderName);
             try {
                 const txtRes = await fetch(`${safeFolder}/_chat.txt`);
                 if (txtRes.ok) {
                     const text = await txtRes.text();
-                    const parsed = parseChat(text, folder);
+                    
+                    const parsed = parseChat(text, folderName, fileInventory);
                     
                     let timestamp = 0;
                     if (parsed.messages.length > 0) {
@@ -55,21 +57,20 @@ async function initApp() {
                     }
 
                     loadedChats.push({
-                        id: folder,
+                        id: folderName,
                         data: parsed,
                         timestamp: timestamp,
                         lastMsg: parsed.messages[parsed.messages.length - 1]?.text || ''
                     });
                     
-                    allChats[folder] = parsed;
+                    allChats[folderName] = parsed;
                 }
             } catch (err) {
-                console.warn(`Failed to load ${folder}:`, err);
+                console.warn(`Failed to load ${folderName}:`, err);
             }
         }
 
         loadedChats.sort((a, b) => b.timestamp - a.timestamp);
-
         renderSidebar(loadedChats);
 
     } catch (err) {
@@ -91,39 +92,29 @@ function loadChat(folderID) {
     const totalMsgs = data.messages.length;
     renderState.msgEndIndex = totalMsgs; 
     renderState.msgStartIndex = Math.max(0, totalMsgs - MSG_CHUNK_SIZE);
-    
     renderState.mediaIndex = 0;
 
     document.getElementById('messageContainer').innerHTML = '';
-    
     renderMessageChunk(data.messages.slice(renderState.msgStartIndex, renderState.msgEndIndex), 'bottom');
     renderMediaDrawer(true);
 }
 
 function handleMessageScroll() {
     if (renderState.isSearching) return;
-
     const container = document.getElementById('messageContainer');
-    
     if (container.scrollTop === 0 && renderState.msgStartIndex > 0) {
-        
         const currentStart = renderState.msgStartIndex;
         const newStart = Math.max(0, currentStart - MSG_CHUNK_SIZE);
-        
         const msgs = allChats[currentChatID].messages;
         const chunk = msgs.slice(newStart, currentStart);
-        
         renderMessageChunk(chunk, 'top');
-        
         renderState.msgStartIndex = newStart;
     }
 }
 
 function renderMessageChunk(chunk, position) {
     const container = document.getElementById('messageContainer');
-    
     const oldScrollHeight = container.scrollHeight;
-    const oldScrollTop = container.scrollTop;
 
     let html = '';
     let lastDate = '';
@@ -175,7 +166,6 @@ function renderMediaDrawer(reset = false) {
     if (reset) {
         container.innerHTML = '';
         renderState.mediaIndex = 0;
-        
         if (currentTab === 'images' || currentTab === 'videos') {
             container.className = 'drawer-content media-grid';
         } else {
@@ -197,9 +187,11 @@ function renderMediaDrawer(reset = false) {
     let html = '';
 
     chunk.forEach(item => {
+        if(item.isMissing) return; 
+
         if (currentTab === 'images') {
             html += `<div class="grid-item">
-                        <img src="${item.path}" loading="lazy" onclick="window.open('${item.path}')" onerror="this.parentElement.style.display='none'">
+                        <img src="${item.path}" loading="lazy" onclick="window.open('${item.path}')">
                      </div>`;
         } else if (currentTab === 'videos') {
             html += `<div class="grid-item" style="border:1px solid #333;">
@@ -249,10 +241,6 @@ function handleSearch(query) {
         return;
     }
 
-    if (matches.length === 250) {
-        container.innerHTML += '<div class="loading-indicator">Showing first 250 matches...</div>';
-    }
-
     let html = '';
     matches.forEach(msg => {
         const isMe = msg.sender.includes(MY_NAME);
@@ -277,15 +265,25 @@ function handleSearch(query) {
 function formatMessageContent(msg) {
     if (!msg.isMedia) return msg.text.replace(/\n/g, '<br>');
 
-    const fullPath = msg.mediaType === 'image' || msg.mediaType === 'video' || msg.mediaType === 'doc' 
-        ? `${encodeURIComponent(msg.folder)}/${encodeURIComponent(msg.filename)}` 
-        : '';
+    if (msg.isMissing) {
+        return `
+            <div class="media-container">
+                <div class="missing-file">
+                    <div style="font-size:24px">⚠️</div>
+                    <div style="font-weight:bold; font-size:12px; margin-top:5px">FILE NOT FOUND</div>
+                    <div style="font-size:10px; opacity:0.7">${msg.filename}</div>
+                </div>
+            </div>
+            ${msg.cleanText}
+        `;
+    }
+
+    const fullPath = `${encodeURIComponent(msg.folder)}/${encodeURIComponent(msg.filename)}`;
     
     if (msg.mediaType === 'image') {
         return `
             <div class="media-container">
-                <img src="${fullPath}" loading="lazy" 
-                     onerror="this.parentElement.innerHTML='<div class=\\'missing-file\\'>⚠️ FILE NOT FOUND<br><small>${msg.filename}</small></div>'">
+                <img src="${fullPath}" loading="lazy">
             </div>
             ${msg.cleanText}
         `;
@@ -294,9 +292,7 @@ function formatMessageContent(msg) {
     if (msg.mediaType === 'video') {
         return `
             <div class="media-container">
-                <video controls preload="metadata" src="${fullPath}" style="width:100%; max-height:300px;" 
-                       onerror="this.parentElement.innerHTML='<div class=\\'missing-file\\'>⚠️ FILE MISSING</div>'">
-                </video>
+                <video controls preload="metadata" src="${fullPath}" style="width:100%; max-height:300px;"></video>
             </div>
              ${msg.cleanText}
         `;
@@ -311,7 +307,7 @@ function formatMessageContent(msg) {
     `;
 }
 
-function parseChat(rawText, folderName) {
+function parseChat(rawText, folderName, fileInventory) {
     const lines = rawText.replace(/\r\n/g, '\n').split('\n');
     const messages = [];
     const media = { images: [], videos: [], docs: [] };
@@ -327,11 +323,11 @@ function parseChat(rawText, folderName) {
             currentMsg = { 
                 date, time, sender: sender.trim(), text: content.trim(), folder: folderName, isMedia: false 
             };
-            checkForMedia(currentMsg, media);
+            checkForMedia(currentMsg, media, fileInventory);
         } else {
             if (currentMsg) {
                 currentMsg.text += '\n' + line.trim();
-                checkForMedia(currentMsg, media);
+                checkForMedia(currentMsg, media, fileInventory);
             }
         }
     });
@@ -339,24 +335,32 @@ function parseChat(rawText, folderName) {
     return { messages, media };
 }
 
-function checkForMedia(msg, mediaStore) {
+function checkForMedia(msg, mediaStore, fileInventory) {
     const attachMatch = msg.text.match(ATTACHMENT_REGEX);
     if (attachMatch) {
         msg.isMedia = true;
         msg.filename = attachMatch[1].trim();
         msg.cleanText = msg.text.replace(attachMatch[0], '').trim();
+        
+        if (!fileInventory.includes(msg.filename)) {
+            msg.isMissing = true;
+            return; 
+        }
+
         const ext = msg.filename.split('.').pop().toLowerCase();
         const fullPath = `${encodeURIComponent(msg.folder)}/${encodeURIComponent(msg.filename)}`;
         
+        const mediaItem = { path: fullPath, filename: msg.filename, ext: ext, isMissing: false };
+
         if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) {
             msg.mediaType = 'image';
-            mediaStore.images.push({ path: fullPath, filename: msg.filename });
+            mediaStore.images.push(mediaItem);
         } else if (['mp4', 'mov', 'avi', 'mkv'].includes(ext)) {
             msg.mediaType = 'video';
-            mediaStore.videos.push({ path: fullPath, filename: msg.filename });
+            mediaStore.videos.push(mediaItem);
         } else {
             msg.mediaType = 'doc';
-            mediaStore.docs.push({ path: fullPath, filename: msg.filename, ext: ext });
+            mediaStore.docs.push(mediaItem);
         }
     }
 }
