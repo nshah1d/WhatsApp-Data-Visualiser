@@ -95,6 +95,4 @@ Your server directory should look like this:
 
 ---
 
-## Contributing
-
-Feel free to submit issues or pull requests if you find bugs in the regex parsing or media handling.
+> _Designed & developed by Nauman Shahid_
