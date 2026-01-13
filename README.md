@@ -1,4 +1,4 @@
-# WhatsApp Archive Viewer (Self-Hosted)
+# WhatsApp Data Visualiser
 
 ![Status](https://img.shields.io/badge/Status-Completed-success) ![Privacy](https://img.shields.io/badge/Privacy-Local%20Only-green) ![Platform](https://img.shields.io/badge/Platform-Web-blue) ![License](https://img.shields.io/badge/License-MIT-orange)
 
