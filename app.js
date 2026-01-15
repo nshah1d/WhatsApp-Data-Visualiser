@@ -4,6 +4,7 @@ const DATE_REGEX = /\[(\d{1,2}\/\d{1,2}\/\d{2,4}),\s*(\d{1,2}:\d{1,2}(?::\d{1,2}
 const ATTACHMENT_REGEX = /<attached: (.*?)>/;
 const MSG_CHUNK_SIZE = 50; 
 const MEDIA_CHUNK_SIZE = 30; 
+const MAX_DOM_MSGS = 200; 
 
 let allChats = {};
 let currentChatID = null;
@@ -13,7 +14,8 @@ let renderState = {
     msgStartIndex: 0,
     msgEndIndex: 0,
     mediaIndex: 0,
-    isSearching: false
+    isSearching: false,
+    isHistoryView: false 
 };
 
 const getSafeId = (str) => {
@@ -86,6 +88,7 @@ function loadChat(folderID) {
     currentChatID = folderID;
     const data = allChats[folderID];
     renderState.isSearching = false;
+    renderState.isHistoryView = false;
 
     document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
     
@@ -97,6 +100,7 @@ function loadChat(folderID) {
     }
 
     document.getElementById('chatTitle').innerText = folderID;
+    document.getElementById('jumpToPresentBtn').style.display = 'none';
     
     const searchBox = document.getElementById('msgSearch');
     searchBox.style.display = 'block';
@@ -112,24 +116,133 @@ function loadChat(folderID) {
     renderState.msgStartIndex = Math.max(0, totalMsgs - MSG_CHUNK_SIZE);
     renderState.mediaIndex = 0;
 
-    document.getElementById('messageContainer').innerHTML = '';
+    const container = document.getElementById('messageContainer');
+    container.innerHTML = '';
     renderMessageChunk(data.messages.slice(renderState.msgStartIndex, renderState.msgEndIndex), 'bottom');
+    
+    container.scrollTop = container.scrollHeight;
 
     setTimeout(() => {
         renderMediaDrawer(true);
     }, 100);
 }
 
+window.jumpToLatest = () => {
+    if(!currentChatID) return;
+    loadChat(currentChatID);
+}
+
+window.jumpToMessage = (index) => {
+    if (!currentChatID) return;
+    const data = allChats[currentChatID];
+    const totalMsgs = data.messages.length;
+
+    renderState.isSearching = false;
+    renderState.isHistoryView = true;
+    
+    document.getElementById('msgSearch').value = '';
+    
+    const windowSize = MSG_CHUNK_SIZE; 
+    let start = Math.max(0, index - Math.floor(windowSize / 2));
+    let end = Math.min(totalMsgs, start + windowSize);
+    
+    if (end - start < windowSize && start > 0) {
+        start = Math.max(0, end - windowSize);
+    }
+
+    renderState.msgStartIndex = start;
+    renderState.msgEndIndex = end;
+
+    const container = document.getElementById('messageContainer');
+    container.innerHTML = ''; 
+    
+    renderMessageChunk(data.messages.slice(start, end), 'bottom');
+
+    const targetEl = document.getElementById(`msg-${index}`);
+    if (targetEl) {
+        targetEl.scrollIntoView({ block: 'center', behavior: 'auto' });
+        targetEl.classList.add('flash-highlight');
+        setTimeout(() => targetEl.classList.remove('flash-highlight'), 2000);
+    }
+
+    updateJumpButton();
+};
+
+function updateJumpButton() {
+    const container = document.getElementById('messageContainer');
+    const data = allChats[currentChatID];
+    if (!data) return;
+    
+    const totalMsgs = data.messages.length;
+    const distFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    
+    const isAtVirtualEnd = renderState.msgEndIndex >= totalMsgs - 20;
+    const isAtVisualBottom = distFromBottom < 300;
+
+    if (isAtVirtualEnd && isAtVisualBottom) {
+        document.getElementById('jumpToPresentBtn').style.display = 'none';
+    } else {
+        document.getElementById('jumpToPresentBtn').style.display = 'flex';
+    }
+}
+
 function handleMessageScroll() {
     if (renderState.isSearching) return;
     const container = document.getElementById('messageContainer');
+    const data = allChats[currentChatID];
+    const totalMsgs = data.messages.length;
+
     if (container.scrollTop === 0 && renderState.msgStartIndex > 0) {
         const currentStart = renderState.msgStartIndex;
         const newStart = Math.max(0, currentStart - MSG_CHUNK_SIZE);
-        const msgs = allChats[currentChatID].messages;
-        const chunk = msgs.slice(newStart, currentStart);
+        const chunk = data.messages.slice(newStart, currentStart);
+        
         renderMessageChunk(chunk, 'top');
         renderState.msgStartIndex = newStart;
+        
+        pruneDOM('bottom');
+    }
+    
+    if (container.scrollHeight - container.scrollTop <= container.clientHeight + 100) {
+        if (renderState.msgEndIndex < totalMsgs) {
+            const currentEnd = renderState.msgEndIndex;
+            const newEnd = Math.min(totalMsgs, currentEnd + MSG_CHUNK_SIZE);
+            const chunk = data.messages.slice(currentEnd, newEnd);
+            
+            renderMessageChunk(chunk, 'bottom');
+            renderState.msgEndIndex = newEnd;
+            
+            pruneDOM('top');
+        }
+    }
+
+    updateJumpButton();
+}
+
+function pruneDOM(direction) {
+    const container = document.getElementById('messageContainer');
+    const children = Array.from(container.children);
+    const count = children.length;
+    
+    if (count <= MAX_DOM_MSGS) return;
+
+    const toRemove = count - MAX_DOM_MSGS;
+    
+    if (direction === 'top') {
+        let removedHeight = 0;
+        for (let i = 0; i < toRemove; i++) {
+            if (children[i]) {
+                removedHeight += children[i].offsetHeight;
+                children[i].remove();
+            }
+        }
+        renderState.msgStartIndex += toRemove;
+        
+    } else if (direction === 'bottom') {
+        for (let i = count - 1; i >= count - toRemove; i--) {
+            if (children[i]) children[i].remove();
+        }
+        renderState.msgEndIndex -= toRemove;
     }
 }
 
@@ -152,7 +265,7 @@ function renderMessageChunk(chunk, position) {
         const senderHtml = `<span class="sender-name ${isMe ? 'sender-me' : ''}" style="color:${isMe ? 'inherit' : senderColor}; opacity: ${isMe ? 0.8 : 1}">${msg.sender}</span>`;
 
         html += `
-            <div class="msg ${isMe ? 'msg-me' : 'msg-them'}">
+            <div class="msg ${isMe ? 'msg-me' : 'msg-them'}" id="msg-${msg.originalIndex}">
                 ${senderHtml}
                 ${formatMessageContent(msg)}
                 <div class="msg-meta">${msg.time}</div>
@@ -161,8 +274,7 @@ function renderMessageChunk(chunk, position) {
     });
 
     if (position === 'bottom') {
-        container.innerHTML += html;
-        container.scrollTop = container.scrollHeight;
+        container.insertAdjacentHTML('beforeend', html);
     } else {
         container.insertAdjacentHTML('afterbegin', html);
         const newScrollHeight = container.scrollHeight;
@@ -360,7 +472,7 @@ function handleSearch(query) {
         const senderHtml = `<span class="sender-name ${isMe ? 'sender-me' : ''}" style="color:${isMe ? 'inherit' : senderColor}; opacity: ${isMe ? 0.8 : 1}">${msg.sender}</span>`;
 
         html += `
-            <div class="msg ${isMe ? 'msg-me' : 'msg-them'}">
+            <div class="msg ${isMe ? 'msg-me' : 'msg-them'} search-result-item" onclick="window.jumpToMessage(${msg.originalIndex})">
                 ${senderHtml}
                 ${content}
                 <div class="msg-meta">${msg.time} - ${msg.date}</div> 
@@ -420,13 +532,17 @@ function parseChat(rawText, folderName, fileInventory) {
     const messages = [];
     const media = { images: [], videos: [], docs: [] };
     let currentMsg = null;
+    let globalIndex = 0;
 
     lines.forEach(line => {
         const cleanLine = line.replace(/^[\u200B-\u200F\u202A-\u202E\s]+/, '');
         const match = cleanLine.match(DATE_REGEX);
         
         if (match) {
-            if (currentMsg) messages.push(currentMsg);
+            if (currentMsg) {
+                currentMsg.originalIndex = globalIndex++;
+                messages.push(currentMsg);
+            }
             const [_, date, time, sender, content] = match;
             currentMsg = { 
                 date, time, sender: sender.trim(), text: content.trim(), folder: folderName, isMedia: false 
@@ -439,7 +555,10 @@ function parseChat(rawText, folderName, fileInventory) {
             }
         }
     });
-    if (currentMsg) messages.push(currentMsg);
+    if (currentMsg) {
+        currentMsg.originalIndex = globalIndex++;
+        messages.push(currentMsg);
+    }
     return { messages, media };
 }
 

@@ -1,6 +1,6 @@
 # WhatsApp Data Visualiser
 
-![Status](https://img.shields.io/badge/Status-Production-success) ![Privacy](https://img.shields.io/badge/Privacy-Local%20Only-green) ![Platform](https://img.shields.io/badge/Architecture-Responsive-blue) ![License](https://img.shields.io/badge/License-MIT-orange)
+![Status](https://img.shields.io/badge/Status-Production-success) ![Privacy](https://img.shields.io/badge/Privacy-Local%20Only-green) ![Platform](https://img.shields.io/badge/Architecture-Responsive-blue) ![License](https://img.shields.io/badge/License-MIT-orange) [![Live Demo](https://img.shields.io/badge/Demo-Live%20Preview-31B33B)](https://www.nauman.cc/demo/whatsapp/)
 
 A high-fidelity, privacy-focused visualisation engine for WhatsApp chat exports.
 
@@ -34,6 +34,17 @@ On touch devices (<768px), the system shifts to a **Native-App Emulation Mode**:
 * **Touch Optimisation:** Enlarged hit targets and swipe-friendly gestures.
 * **Smart Viewport:** Disables accidental zooming (`user-scalable=no`) to mimic native application behaviour.
 * **Adaptive Grid:** Media galleries dynamically reflow columns to maintain visual clarity on narrower screens.
+
+---
+
+## Virtualisation & Navigation Engine
+
+To handle multi-gigabyte chat logs without crashing the browser, the application utilises a custom **Bi-Directional Virtual Scrolling** algorithm:
+
+* **Teleportation Logic:** When jumping to a search result, the engine bypasses linear scrolling. Instead, it calculates the target index, wipes the DOM to free memory, and injects a localised "slice" of history (e.g., 20 messages before/after).
+* **Bi-Directional Loading:** Unlike standard infinite scroll (which only looks up), this engine detects scroll boundaries in both directions. Users can scroll up to load older context or down to read towards the present.
+* **Asset Lazy-Loading:** Heavy media assets (images/videos) outside the active viewport are effectively garbage-collected, keeping the memory footprint minimal regardless of the jump depth.
+* **Context Restoration:** A "Return to Present" floating action button (FAB) automatically detects when the user is viewing historical data and offers a one-click return to the live conversation end.
 
 ---
 

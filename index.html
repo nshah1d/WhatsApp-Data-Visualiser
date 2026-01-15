@@ -48,7 +48,7 @@
             <span>WhatsApp</span>
         </div>
         <div class="search-container">
-            <input type="text" id="contactSearch" class="search-input" placeholder="Search for a chat">
+            <input type="text" id="contactSearch" class="search-input" placeholder="Search or start new chat">
         </div>
         <div class="chat-list" id="chatList">
             <div style="padding:40px; text-align:center; color:var(--text-secondary);">
@@ -79,6 +79,10 @@
                 </svg>
             </div>
         </div>
+        
+        <button id="jumpToPresentBtn" class="scroll-down-btn" onclick="window.jumpToLatest()">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </button>
     </div>
 
     <div class="media-drawer" id="mediaDrawer">
