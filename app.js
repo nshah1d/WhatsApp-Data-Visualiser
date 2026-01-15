@@ -1,9 +1,9 @@
-// Configuration
-const MY_NAME = "John Doe"; // Change this to your WhatsApp Display Name
+
+const MY_NAME = "John Doe"; 
 const DATE_REGEX = /\[(\d{1,2}\/\d{1,2}\/\d{2,4}),\s*(\d{1,2}:\d{1,2}(?::\d{1,2})?)\]\s*(.*?):\s*(.*)/;
 const ATTACHMENT_REGEX = /<attached: (.*?)>/;
-const MSG_CHUNK_SIZE = 50; // How many messages to load at once
-const MEDIA_CHUNK_SIZE = 30; // How many images to load at once
+const MSG_CHUNK_SIZE = 50; 
+const MEDIA_CHUNK_SIZE = 30; 
 
 let allChats = {};
 let currentChatID = null;
@@ -14,6 +14,10 @@ let renderState = {
     msgEndIndex: 0,
     mediaIndex: 0,
     isSearching: false
+};
+
+const getSafeId = (str) => {
+    return btoa(unescape(encodeURIComponent(str))).replace(/[^a-zA-Z0-9]/g, '');
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -84,10 +88,24 @@ function loadChat(folderID) {
     renderState.isSearching = false;
 
     document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
+    
+    const safeFolderId = getSafeId(folderID);
+    const activeItem = document.getElementById(`chat-item-${safeFolderId}`);
+    if (activeItem) {
+        activeItem.classList.add('active');
+        activeItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
     document.getElementById('chatTitle').innerText = folderID;
+    
     const searchBox = document.getElementById('msgSearch');
     searchBox.style.display = 'block';
     searchBox.value = '';
+
+    currentTab = 'images';
+    const tabs = document.querySelectorAll('.tab');
+    tabs.forEach(t => t.classList.remove('active'));
+    if(tabs.length > 0) tabs[0].classList.add('active'); 
 
     const totalMsgs = data.messages.length;
     renderState.msgEndIndex = totalMsgs; 
@@ -96,7 +114,10 @@ function loadChat(folderID) {
 
     document.getElementById('messageContainer').innerHTML = '';
     renderMessageChunk(data.messages.slice(renderState.msgStartIndex, renderState.msgEndIndex), 'bottom');
-    renderMediaDrawer(true);
+
+    setTimeout(() => {
+        renderMediaDrawer(true);
+    }, 100);
 }
 
 function handleMessageScroll() {
@@ -126,11 +147,9 @@ function renderMessageChunk(chunk, position) {
         }
 
         const isMe = msg.sender.includes(MY_NAME);
-        let senderHtml = '';
-        if (!isMe) {
-            const color = stringToColor(msg.sender);
-            senderHtml = `<span class="sender-name" style="color:${color}">${msg.sender}</span>`;
-        }
+        
+        let senderColor = isMe ? 'var(--bubble-text-me)' : stringToColor(msg.sender);
+        const senderHtml = `<span class="sender-name ${isMe ? 'sender-me' : ''}" style="color:${isMe ? 'inherit' : senderColor}; opacity: ${isMe ? 0.8 : 1}">${msg.sender}</span>`;
 
         html += `
             <div class="msg ${isMe ? 'msg-me' : 'msg-them'}">
@@ -153,7 +172,7 @@ function renderMessageChunk(chunk, position) {
 
 function handleMediaScroll() {
     const container = document.getElementById('drawerContent');
-    if (container.scrollHeight - container.scrollTop <= container.clientHeight + 50) {
+    if (container.scrollHeight > container.clientHeight && container.scrollHeight - container.scrollTop <= container.clientHeight + 200) {
         renderMediaDrawer(false);
     }
 }
@@ -188,19 +207,30 @@ function renderMediaDrawer(reset = false) {
 
     chunk.forEach(item => {
         if(item.isMissing) return; 
+        
+        const safeId = getSafeId(item.filename);
 
         if (currentTab === 'images') {
             html += `<div class="grid-item">
-                        <img src="${item.path}" loading="lazy" onclick="window.open('${item.path}')">
+                        <div class="grid-content">
+                            <img src="${item.path}" loading="lazy" onclick="window.open('${item.path}')">
+                        </div>
                      </div>`;
         } else if (currentTab === 'videos') {
-            html += `<div class="grid-item" style="border:1px solid #333;">
-                        <video src="${item.path}" preload="metadata" style="width:100%; height:100%; object-fit:cover;" 
-                           onmouseover="this.play()" onmouseout="this.pause()"></video>
+            html += `<div class="grid-item video-item" id="vid-${safeId}">
+                        <div class="grid-content">
+                            <video src="${item.path}#t=0.1" preload="metadata" muted playsinline></video>
+                            <div class="mini-play-btn" onclick="window.playPreview('${safeId}')">▶</div>
+                        </div>
+                        <button class="item-menu-btn video-menu-btn" onclick="window.toggleMenu(event, '${safeId}')">⋮</button>
+                        <div class="ctx-menu" id="menu-${safeId}" style="display:none;">
+                            <button class="ctx-menu-item" onclick="window.openVideo('${item.path}')">Full Screen</button>
+                            <button class="ctx-menu-item" onclick="window.downloadFile('${item.path}', '${item.filename.replace(/'/g, "\\'")}')">Download</button>
+                        </div>
                      </div>`;
         } else {
             html += `<a href="${item.path}" target="_blank" class="doc-card">
-                        <div class="doc-icon" style="background:#54656f">${item.ext}</div>
+                        <div class="doc-icon">${item.ext}</div>
                         <span>${item.filename}</span>
                      </a>`;
         }
@@ -209,6 +239,81 @@ function renderMediaDrawer(reset = false) {
     container.insertAdjacentHTML('beforeend', html);
     renderState.mediaIndex = end;
 }
+
+window.playPreview = (id) => {
+    const container = document.getElementById(`vid-${id}`);
+    if (!container) return;
+    const video = container.querySelector('video');
+    const btn = container.querySelector('.mini-play-btn');
+    
+    if (video.paused) {
+        document.querySelectorAll('video').forEach(v => {
+            if(v !== video) {
+                v.pause();
+                v.currentTime = 0;
+                if(v.nextElementSibling) v.nextElementSibling.style.display = 'flex';
+            }
+        });
+
+        video.currentTime = 0;
+        video.muted = true;
+        video.play().then(() => {
+            btn.style.display = 'none';
+            setTimeout(() => {
+                video.pause();
+                video.currentTime = 0;
+                btn.style.display = 'flex';
+            }, 5000);
+        }).catch(e => console.log(e));
+    } else {
+        video.pause();
+        btn.style.display = 'flex';
+    }
+};
+
+window.toggleMenu = (event, id) => {
+    if (event) event.stopPropagation();
+
+    const allMenus = document.querySelectorAll('.ctx-menu');
+    const targetMenu = document.getElementById(`menu-${id}`);
+    
+    allMenus.forEach(m => {
+        if(m !== targetMenu) m.style.display = 'none';
+    });
+    
+    if (targetMenu.style.display === 'none') {
+        if (event && event.currentTarget) {
+            const btnRect = event.currentTarget.getBoundingClientRect();
+            targetMenu.style.top = (btnRect.bottom + 5) + 'px';
+            targetMenu.style.right = (window.innerWidth - btnRect.right) + 'px';
+            targetMenu.style.left = 'auto'; 
+        }
+        
+        targetMenu.style.display = 'block';
+    } else {
+        targetMenu.style.display = 'none';
+    }
+};
+
+window.openVideo = (path) => {
+    window.open(path, '_blank');
+};
+
+window.downloadFile = (path, name) => {
+    const link = document.createElement('a');
+    link.href = path;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+};
+
+window.switchTab = (el, tab) => {
+    currentTab = tab;
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    el.classList.add('active');
+    renderMediaDrawer(true);
+};
 
 function handleSearch(query) {
     if (!currentChatID) return;
@@ -250,10 +355,13 @@ function handleSearch(query) {
         if (!msg.isMedia) {
             content = content.replace(regex, '<span class="highlight">$1</span>');
         }
+        
+        let senderColor = isMe ? 'var(--bubble-text-me)' : stringToColor(msg.sender);
+        const senderHtml = `<span class="sender-name ${isMe ? 'sender-me' : ''}" style="color:${isMe ? 'inherit' : senderColor}; opacity: ${isMe ? 0.8 : 1}">${msg.sender}</span>`;
 
         html += `
             <div class="msg ${isMe ? 'msg-me' : 'msg-them'}">
-                <span class="sender-name">${msg.sender}</span>
+                ${senderHtml}
                 ${content}
                 <div class="msg-meta">${msg.time} - ${msg.date}</div> 
             </div>
@@ -269,9 +377,9 @@ function formatMessageContent(msg) {
         return `
             <div class="media-container">
                 <div class="missing-file">
-                    <div style="font-size:24px">⚠️</div>
-                    <div style="font-weight:bold; font-size:12px; margin-top:5px">FILE NOT FOUND</div>
-                    <div style="font-size:10px; opacity:0.7">${msg.filename}</div>
+                    <div style="font-size:20px">⚠️</div>
+                    <div style="font-weight:bold; font-size:11px; margin-top:4px">MISSING</div>
+                    <div style="font-size:9px; opacity:0.7">${msg.filename}</div>
                 </div>
             </div>
             ${msg.cleanText}
@@ -283,7 +391,7 @@ function formatMessageContent(msg) {
     if (msg.mediaType === 'image') {
         return `
             <div class="media-container">
-                <img src="${fullPath}" loading="lazy">
+                <img src="${fullPath}" loading="lazy" onclick="window.open('${fullPath}')">
             </div>
             ${msg.cleanText}
         `;
@@ -292,7 +400,7 @@ function formatMessageContent(msg) {
     if (msg.mediaType === 'video') {
         return `
             <div class="media-container">
-                <video controls preload="metadata" src="${fullPath}" style="width:100%; max-height:300px;"></video>
+                <video controls preload="metadata" src="${fullPath}#t=0.1"></video>
             </div>
              ${msg.cleanText}
         `;
@@ -385,6 +493,7 @@ function renderSidebar(chatArray) {
     chatArray.forEach(chat => {
         const div = document.createElement('div');
         div.className = 'chat-item';
+        div.id = `chat-item-${getSafeId(chat.id)}`; 
         div.onclick = () => loadChat(chat.id);
         let preview = chat.lastMsg;
         if (preview.length > 50) preview = preview.substring(0, 50) + '...';
@@ -402,14 +511,6 @@ function filterContacts(query) {
         const name = item.querySelector('h4').innerText.toLowerCase();
         item.style.display = name.includes(query.toLowerCase()) ? 'flex' : 'none';
     });
-}
-
-function switchTab(tab) {
-    currentTab = tab;
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    const clickedTab = Array.from(document.querySelectorAll('.tab')).find(el => el.textContent.toLowerCase().includes(tab));
-    if(clickedTab) clickedTab.classList.add('active');
-    renderMediaDrawer(true);
 }
 
 function stringToColor(str) {
